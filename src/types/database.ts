@@ -204,25 +204,62 @@ export interface HandoffResult {
   explanation: string;
   recommendation: string;
 }
-
 export interface DashboardSummary {
   overallRisk: SeverityLevel;
-  /** 0-100, higher is healthier. Derived from the severity mix across all detected insights. */
   healthScore: number;
   totalAnomalies: number;
   contextSwitchingAnomalies: number;
   handoffBreakdownAnomalies: number;
+  hiddenWaitingAnomalies: number;
+  highRiskTasks: number;
+}
+
+export interface WaitingTimeFeatures {
+  idleHours: number;
+  waitingFrequency: number;
+  currentIdleHours: number;
+}
+
+export interface WaitingTimeResult {
+  taskId: string;
+  taskTitle: string | null;
+  waitingTimeScore: number;
+  anomalyScore: number;
+  isAnomaly: boolean;
+  isHighWaitingTime: boolean;
+  severity: SeverityLevel;
+  method: "iqr" | "isolation_forest";
+  features: WaitingTimeFeatures;
+  explanation: string;
+  recommendation: string;
+}
+
+export interface RiskFeatures {
+  priority: PriorityLevel;
+  totalDependents: number;
+  blockedDependents: number;
+  daysUntilDue: number | null;
+}
+
+export interface RiskScoreResult {
+  taskId: string;
+  taskTitle: string | null;
+  riskScore: number;
+  riskLevel: SeverityLevel;
+  ruleScore: number;
+  waitingTimeAnomalyScore: number;
+  isWaitingTimeAnomaly: boolean;
+  features: RiskFeatures;
+  reasons: string[];
+  explanation: string;
 }
 
 export interface InsightsDashboardResult {
   summary: DashboardSummary;
   contextSwitching: ContextSwitchingResult[];
   handoffBreakdowns: HandoffResult[];
-  /** Always [] — Hidden Waiting Time Detection isn't implemented in this project. See hiddenWaitingStatus. */
-  hiddenWaiting: unknown[];
-  hiddenWaitingStatus: "not_implemented";
-  /** Top actionable recommendations pulled from the high/critical severity insights above. */
+  hiddenWaiting: WaitingTimeResult[];
+  riskScores: RiskScoreResult[];
   recommendations: string[];
   computedAt: string;
 }
-

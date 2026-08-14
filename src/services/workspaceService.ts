@@ -125,3 +125,63 @@ export async function deleteWorkspace(workspaceId: string, userId: string) {
 
   if (error) throw new AppError(error.message, 500);
 }
+export async function listWorkspaceMembers(workspaceId: string, userId: string) {
+  await requireWorkspaceAccess(userId, workspaceId);
+
+  const { data, error } = await supabase
+    .from("workspace_members")
+    .select("id, user_id, role, created_at, app_user:user_id(id, name, email)")
+    .eq("workspace_id", workspaceId)
+    .order("created_at", { ascending: true });
+
+  if (error) throw new AppError(error.message, 500);
+  return data ?? [];
+}
+
+export async function addWorkspaceMember(
+  workspaceId: string,
+  actorId: string,
+  memberUserId: string,
+  role: "admin" | "editor" | "viewer" = "viewer"
+) {
+  await requireWorkspaceOwner(actorId, workspaceId);
+
+  const { data, error } = await supabase
+    .from("workspace_members")
+    .upsert(
+      { workspace_id: workspaceId, user_id: memberUserId, role },
+      { onConflict: "workspace_id,user_id" }
+    )
+    .select()
+    .single();
+
+  if (error) throw new AppError(error.message, 500);
+  return data;
+}
+
+export async function removeWorkspaceMember(
+  workspaceId: string,
+  actorId: string,
+  memberUserId: string
+) {
+  await requireWorkspaceOwner(actorId, workspaceId);
+
+  const { data: workspace, error: wsError } = await supabase
+    .from("workspace")
+    .select("owner_user_id")
+    .eq("id", workspaceId)
+    .maybeSingle();
+
+  if (wsError) throw new AppError(wsError.message, 500);
+  if (workspace?.owner_user_id === memberUserId) {
+    throw new AppError("Cannot remove the workspace owner", 400);
+  }
+
+  const { error } = await supabase
+    .from("workspace_members")
+    .delete()
+    .eq("workspace_id", workspaceId)
+    .eq("user_id", memberUserId);
+
+  if (error) throw new AppError(error.message, 500);
+}

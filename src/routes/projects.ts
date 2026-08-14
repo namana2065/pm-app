@@ -7,8 +7,11 @@ import {
   listProjects,
   updateProject,
 } from "../services/projectService";
-import { addProjectMember, removeUserFromProject } from "../services/membershipService";
-
+import {
+  addProjectMember,
+  listProjectMembers,
+  removeUserFromProject,
+} from "../services/membershipService";
 const router = Router();
 
 router.post("/", async (req, res, next) => {
@@ -21,7 +24,15 @@ router.post("/", async (req, res, next) => {
     next(err);
   }
 });
-
+router.get("/:projectId/members", async (req, res, next) => {
+  try {
+    const userId = getUserId(req);
+    const members = await listProjectMembers(req.params.projectId, userId);
+    res.json(members);
+  } catch (err) {
+    next(err);
+  }
+});
 router.get("/workspace/:workspaceId", async (req, res, next) => {
   try {
     const userId = getUserId(req);

@@ -2,6 +2,8 @@ import { Router } from "express";
 import { getUserId } from "../utils/auth";
 import { getContextSwitchingInsights } from "../services/contextSwitchingService";
 import { getHandoffBreakdownInsights } from "../services/handoffService";
+import { getWaitingTimeInsights } from "../services/waitingTimeService";
+import { getProjectRiskInsights } from "../services/riskScoreService";
 import { getInsightsDashboard } from "../services/insightsDashboardService";
 
 const router = Router();
@@ -20,6 +22,25 @@ router.get("/handoffs/:projectId", async (req, res, next) => {
   try {
     const userId = getUserId(req);
     const insights = await getHandoffBreakdownInsights(req.params.projectId, userId);
+    res.json(insights);
+  } catch (err) {
+    next(err);
+  }
+});
+router.get("/waiting-time/:projectId", async (req, res, next) => {
+  try {
+    const userId = getUserId(req);
+    const insights = await getWaitingTimeInsights(req.params.projectId, userId);
+    res.json(insights);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get("/risk/:projectId", async (req, res, next) => {
+  try {
+    const userId = getUserId(req);
+    const insights = await getProjectRiskInsights(req.params.projectId, userId);
     res.json(insights);
   } catch (err) {
     next(err);

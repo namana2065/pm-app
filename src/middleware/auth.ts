@@ -6,16 +6,28 @@ export interface AuthRequest extends Request {
   userId: string;
 }
 
-/** Temporary auth: pass the acting user's UUID in X-User-Id until Supabase Auth is wired. */
-export async function requireUser(
-  req: Request,
-  res: Response,
-  next: NextFunction
-) {
+/**
+ * Accepts either:
+ *  - Authorization: Bearer <token>  → real session from /api/auth/login or /api/auth/signup
+ *  - X-User-Id: <uuid>              → legacy path, still works exactly as before
+ */
+export async function requireUser(req: Request, res: Response, next: NextFunction) {
   try {
+    const authHeader = req.header("Authorization");
+    const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
+
+    if (token) {
+      const { data, error } = await supabase.auth.getUser(token);
+      if (error || !data.user) {
+        throw new AppError("Invalid or expired session", 401);
+      }
+      (req as AuthRequest).userId = data.user.id;
+      return next();
+    }
+
     const userId = req.header("X-User-Id");
     if (!userId) {
-      throw new AppError("Missing X-User-Id header", 401);
+      throw new AppError("Missing Authorization bearer token or X-User-Id header", 401);
     }
 
     const { data, error } = await supabase

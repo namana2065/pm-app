@@ -3,13 +3,13 @@ import cors from "cors";
 import { requireUser } from "./middleware/auth";
 import { errorHandler } from "./middleware/errorHandler";
 import projectRoutes from "./routes/projects";
+import authRoutes from "./routes/auth";
 import sectionRoutes from "./routes/sections";
 import taskRoutes from "./routes/tasks";
 import workspaceRoutes from "./routes/workspaces";
 import dependencyRoutes from "./routes/dependencies";
 import historyRoutes from "./routes/history";
 import insightsRoutes from "./routes/insights";
-
 
 export function createApp() {
   const app = express();
@@ -21,6 +21,10 @@ export function createApp() {
     res.json({ ok: true });
   });
 
+  // Auth routes must NOT require authentication
+  app.use("/api/auth", authRoutes);
+
+  // Everything below this point requires authentication
   app.use(requireUser);
 
   app.use("/api/workspaces", workspaceRoutes);

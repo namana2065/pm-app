@@ -5,7 +5,9 @@ import {
   deleteDep,
   listDeps,
 } from "../services/dependencyService";
-
+import { validateTaskAccess } from "../services/accessService";
+import { getTaskRiskScore } from "../services/riskScoreService";
+import { getTaskImpact } from "../services/dependencyAnalysisService";
 const router = Router();
 
 router.get("/task/:taskId", async (req, res, next) => {
@@ -39,4 +41,29 @@ router.delete("/:depId", async (req, res, next) => {
   }
 });
 
+router.get("/task/:taskId/impact", async (req, res, next) => {
+  try {
+    const userId = getUserId(req);
+
+    await validateTaskAccess(userId, req.params.taskId);
+
+    const impact = await getTaskImpact(req.params.taskId);
+
+    res.json(impact);
+  } catch (err) {
+    next(err);
+  }
+});
+router.get("/task/:taskId/risk", async (req, res, next) => {
+  try {
+    const userId = getUserId(req);
+
+    await validateTaskAccess(userId, req.params.taskId);
+
+    const result = await getTaskRiskScore(req.params.taskId, userId);
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+});
 export default router;

@@ -167,3 +167,57 @@ export async function getProjectAssigneeEvents(
   return (data ?? []) as AssigneeEvent[];
 }
 
+export interface HistoryFeedEntry {
+  id: string;
+  taskId: string;
+  taskTitle: string | null;
+  userId: string | null;
+  userName: string | null;
+  eventType: string;
+  status: StatusType | null;
+  createdAt: string;
+}
+
+async function extractStatusForFeed(snapshot: Partial<Task> | null): Promise<StatusType> {
+  return (snapshot?.status as StatusType) ?? "to_do";
+}
+
+export async function getProjectHistoryFeed(projectId: string): Promise<HistoryFeedEntry[]> {
+  const history = await getProjectHistory(projectId);
+  if (history.length === 0) return [];
+
+  const taskIds = Array.from(new Set(history.map((h) => h.task_id)));
+  const userIds = Array.from(new Set(history.map((h) => h.user_id).filter(Boolean)));
+
+  const [{ data: tasks, error: taskError }, { data: users, error: userError }] =
+    await Promise.all([
+      supabase.from("task").select("id, title").in("id", taskIds),
+      userIds.length > 0
+        ? supabase.from("app_user").select("id, name").in("id", userIds)
+        : Promise.resolve({ data: [] as { id: string; name: string }[], error: null }),
+    ]);
+
+  if (taskError) throw new AppError(taskError.message, 500);
+  if (userError) throw new AppError(userError.message, 500);
+
+  const taskMap = new Map((tasks ?? []).map((t) => [t.id, t.title]));
+  const userMap = new Map((users ?? []).map((u) => [u.id, u.name]));
+
+  const entries = await Promise.all(
+    history
+      .slice()
+      .reverse()
+      .map(async (h) => ({
+        id: h.id,
+        taskId: h.task_id,
+        taskTitle: taskMap.get(h.task_id) ?? null,
+        userId: h.user_id,
+        userName: h.user_id ? userMap.get(h.user_id) ?? null : null,
+        eventType: h.event_type,
+        status: await extractStatusForFeed(h.task_snapshot),
+        createdAt: h.created_at,
+      }))
+  );
+
+  return entries;
+}

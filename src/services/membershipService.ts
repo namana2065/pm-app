@@ -55,3 +55,14 @@ export async function addProjectMember(
   if (error) throw new AppError(error.message, 500);
   return data;
 }
+export async function listProjectMembers(projectId: string, userId: string) {
+  await requireProjectAccess(userId, projectId, "viewer");
+
+  const { data, error } = await supabase
+    .from("project_members")
+    .select("id, user_id, role, app_user:user_id(id, name, email)")
+    .eq("project_id", projectId);
+
+  if (error) throw new AppError(error.message, 500);
+  return data ?? [];
+}
