@@ -14,7 +14,7 @@ import {
 const INSIGHT_TYPE = "handoff_breakdown";
 const IDLE_STATUSES = new Set(["waiting", "blocked"]);
 
-interface PairedHandoff {
+export interface PairedHandoff {
   taskId: string;
   previousOwnerId: string | null;
   nextOwnerId: string | null;
@@ -57,30 +57,75 @@ async function loadAssigneeEvents(
 }
 
 /**
- * Pairs each "assignee_removed" event with the next "assignee_added" event
- * that follows it for the same task (FIFO), treating that pair as one
- * completed ownership handoff. Removals with no later addition (task still
- * unowned) are left unpaired and excluded — there's no completed handoff to
- * score yet.
+ * Pairs assignee events for one task into ownership handoffs.
+ *
+ * A handoff is an outgoing assignee X being replaced by a DIFFERENT assignee Y,
+ * in either order:
+ *   - remove X, then add Y   (delay = time between the two events)
+ *   - add Y, then remove X   (delay = 0, the new owner was already in place)
+ *
+ * Removing and re-adding the SAME user is a re-assignment, not a handoff, and
+ * is ignored. Events are matched by user id (not first-in-first-out), so
+ * interleaved changes for several users cannot create a fake A -> B transfer.
+ * Unmatched removals/additions are left unpaired (no completed handoff yet).
  */
-function pairHandoffs(taskId: string, events: AssigneeEvent[]): PairedHandoff[] {
-  const pending: AssigneeEvent[] = [];
+export function pairHandoffs(taskId: string, events: AssigneeEvent[]): PairedHandoff[] {
+  const pendingRemovals: { userId: string; at: string }[] = [];
+  const pendingAdditions: { userId: string; at: string }[] = [];
   const handoffs: PairedHandoff[] = [];
 
-  for (const event of events) {
-    if (event.event_type === "assignee_removed") {
-      pending.push(event);
-    } else if (event.event_type === "assignee_added") {
-      const removal = pending.shift();
-      if (!removal) continue; // addition with no pending removal isn't a handoff
+  const sorted = [...events].sort(
+    (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+  );
 
-      handoffs.push({
-        taskId,
-        previousOwnerId: removal.from_value,
-        nextOwnerId: event.to_value,
-        removedAt: removal.created_at,
-        addedAt: event.created_at,
-      });
+  for (const event of sorted) {
+    if (event.event_type === "assignee_removed") {
+      const userId = event.from_value ?? event.user_id;
+      if (!userId) continue;
+
+      // Added then removed again: cancel that pending addition.
+      const own = pendingAdditions.findIndex((a) => a.userId === userId);
+      if (own !== -1) pendingAdditions.splice(own, 1);
+
+      // A different user was already added -> add-then-remove handoff.
+      const next = pendingAdditions.findIndex((a) => a.userId !== userId);
+      if (next !== -1) {
+        const [added] = pendingAdditions.splice(next, 1);
+        handoffs.push({
+          taskId,
+          previousOwnerId: userId,
+          nextOwnerId: added.userId,
+          removedAt: event.created_at,
+          addedAt: added.at,
+        });
+      } else {
+        pendingRemovals.push({ userId, at: event.created_at });
+      }
+    } else if (event.event_type === "assignee_added") {
+      const userId = event.to_value ?? event.user_id;
+      if (!userId) continue;
+
+      // Same user removed earlier and re-added: a re-assignment, not a handoff.
+      const same = pendingRemovals.findIndex((r) => r.userId === userId);
+      if (same !== -1) {
+        pendingRemovals.splice(same, 1);
+        continue;
+      }
+
+      // A different user was removed earlier -> remove-then-add handoff.
+      const prev = pendingRemovals.findIndex((r) => r.userId !== userId);
+      if (prev !== -1) {
+        const [removed] = pendingRemovals.splice(prev, 1);
+        handoffs.push({
+          taskId,
+          previousOwnerId: removed.userId,
+          nextOwnerId: userId,
+          removedAt: removed.at,
+          addedAt: event.created_at,
+        });
+      } else {
+        pendingAdditions.push({ userId, at: event.created_at });
+      }
     }
   }
 
@@ -113,7 +158,7 @@ function buildFeatures(handoff: PairedHandoff, taskTimeline: StatusTimeline[]): 
   const addedMs = new Date(handoff.addedAt).getTime();
   const handoffDelayHours = Math.max(0, (addedMs - removedMs) / (1000 * 60 * 60));
 
-  const postHandoffIdleHours = computePostHandoffIdleHours(taskTimeline, addedMs);
+  const postHandoffIdleHours = computePostHandoffIdleHours(taskTimeline, Math.max(removedMs, addedMs));
 
   return {
     handoffDelayHours: Math.round(handoffDelayHours * 100) / 100,

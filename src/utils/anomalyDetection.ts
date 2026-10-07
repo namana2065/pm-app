@@ -87,6 +87,33 @@ interface ITreeNode {
 const NUM_TREES = 100;
 const MAX_SUBSAMPLE_SIZE = 256;
 
+/** Fixed default seed so repeated runs on the same data give the same result. */
+export const DEFAULT_ANOMALY_SEED = 42;
+
+type Rng = () => number;
+
+/** mulberry32: small, fast, seedable PRNG returning floats in [0, 1). */
+function createRng(seed: number): Rng {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** Unbiased partial Fisher-Yates: k distinct indices out of 0..n-1. */
+function sampleIndices(n: number, k: number, rng: Rng): number[] {
+  const arr = Array.from({ length: n }, (_, i) => i);
+  for (let i = 0; i < k; i++) {
+    const j = i + Math.floor(rng() * (n - i));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr.slice(0, k);
+}
+
 function averagePathLengthForUnbuiltNode(size: number): number {
   // c(n): average path length of an unsuccessful search in a BST,
   // used to normalize path lengths for leaves that stopped early.
@@ -99,14 +126,15 @@ function buildTree(
   sample: number[][],
   indices: number[],
   depth: number,
-  maxDepth: number
+  maxDepth: number,
+  rng: Rng
 ): ITreeNode {
   if (depth >= maxDepth || indices.length <= 1) {
     return { size: indices.length };
   }
 
   const dims = sample[0].length;
-  const splitFeature = Math.floor(Math.random() * dims);
+  const splitFeature = Math.floor(rng() * dims);
 
   let min = Infinity;
   let max = -Infinity;
@@ -120,7 +148,7 @@ function buildTree(
     return { size: indices.length };
   }
 
-  const splitValue = min + Math.random() * (max - min);
+  const splitValue = min + rng() * (max - min);
 
   const left: number[] = [];
   const right: number[] = [];
@@ -138,8 +166,8 @@ function buildTree(
     size: indices.length,
     splitFeature,
     splitValue,
-    left: buildTree(sample, left, depth + 1, maxDepth),
-    right: buildTree(sample, right, depth + 1, maxDepth),
+    left: buildTree(sample, left, depth + 1, maxDepth, rng),
+    right: buildTree(sample, right, depth + 1, maxDepth, rng),
   };
 }
 
@@ -160,20 +188,18 @@ function pathLength(node: ITreeNode, point: number[], depth: number): number {
  * Returns scores in [0, 1], where ~0.5 is "normal" and closer to 1 is
  * increasingly anomalous.
  */
-function isolationForestScores(data: number[][]): number[] {
+function isolationForestScores(data: number[][], seed: number): number[] {
+  const rng = createRng(seed);
   const n = data.length;
   const subSampleSize = Math.min(MAX_SUBSAMPLE_SIZE, n);
   const maxDepth = Math.ceil(Math.log2(Math.max(subSampleSize, 2)));
   const normalization = averagePathLengthForUnbuiltNode(subSampleSize) || 1;
 
   const trees: ITreeNode[] = [];
-  const allIndices = Array.from({ length: n }, (_, i) => i);
 
   for (let t = 0; t < NUM_TREES; t++) {
-    // Sample without replacement for this tree.
-    const shuffled = [...allIndices].sort(() => Math.random() - 0.5);
-    const sampleIndices = shuffled.slice(0, subSampleSize);
-    trees.push(buildTree(data, sampleIndices, 0, maxDepth));
+    // Sample without replacement for this tree (unbiased Fisher-Yates).
+    trees.push(buildTree(data, sampleIndices(n, subSampleSize, rng), 0, maxDepth, rng));
   }
 
   return data.map((point) => {
@@ -182,6 +208,17 @@ function isolationForestScores(data: number[][]): number[] {
       trees.length;
     return Math.pow(2, -avgPathLength / normalization);
   });
+}
+
+/**
+ * Maps a raw Isolation Forest score onto the same 0-100 scale the IQR path uses.
+ * Raw ~0.5 means "normal" and must map to 0 (otherwise every point would look
+ * "medium" severity downstream). The anomaly cutoff (0.6) maps to 50, matching
+ * the IQR cutoff, and raw 0.7+ saturates at 100.
+ */
+function isolationScoreTo100(raw: number): number {
+  const scaled = ((raw - 0.5) / (0.7 - 0.5)) * 100;
+  return Math.round(Math.max(0, Math.min(100, scaled)));
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -195,7 +232,10 @@ function isolationForestScores(data: number[][]): number[] {
  *   needs a reasonable sample size to build meaningful trees).
  * - Otherwise -> Isolation Forest.
  */
-export function detectAnomalies(data: number[][]): AnomalyResult[] {
+export function detectAnomalies(
+  data: number[][],
+  options: { seed?: number } = {}
+): AnomalyResult[] {
   const n = data.length;
   if (n === 0) return [];
 
@@ -209,10 +249,10 @@ export function detectAnomalies(data: number[][]): AnomalyResult[] {
     }));
   }
 
-  const rawScores = isolationForestScores(data);
+  const rawScores = isolationForestScores(data, options.seed ?? DEFAULT_ANOMALY_SEED);
   return rawScores.map((score, index) => ({
     index,
-    anomalyScore: Math.round(score * 100),
+    anomalyScore: isolationScoreTo100(score),
     isAnomaly: score >= ISOLATION_FOREST_ANOMALY_THRESHOLD,
     method: "isolation_forest" as const,
   }));

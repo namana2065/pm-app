@@ -54,7 +54,14 @@ export function buildStatusTimeline(
   history: TaskHistory[],
   currentTask?: Task
 ): StatusTimeline[] {
-  const rows = history.filter((h) => h.task_id === taskId);
+  const rows = history
+    .filter((h) => h.task_id === taskId)
+    .sort(
+      (a, b) =>
+        new Date(a.created_at).getTime() -
+        new Date(b.created_at).getTime()
+    );
+
   if (rows.length === 0 && currentTask) {
     return [
       {
@@ -66,21 +73,27 @@ export function buildStatusTimeline(
       },
     ];
   }
+
   const timeline: StatusTimeline[] = [];
 
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
     const status = extractStatus(row.task_snapshot);
     const enteredAt = row.created_at;
-    const nextRow = rows[i + 1];
-    const exitedAt = nextRow?.created_at ?? null;
 
     const prev = timeline[timeline.length - 1];
-    if (prev && prev.status === status && prev.exitedAt === null) {
-      prev.exitedAt = exitedAt;
-      prev.durationHours = hoursBetween(prev.enteredAt, exitedAt);
+
+    // Merge consecutive snapshots with the same status.
+    if (prev && prev.status === status) {
+      prev.exitedAt = rows[i + 1]?.created_at ?? null;
+      prev.durationHours = hoursBetween(
+        prev.enteredAt,
+        prev.exitedAt
+      );
       continue;
     }
+
+    const exitedAt = rows[i + 1]?.created_at ?? null;
 
     timeline.push({
       taskId,
@@ -90,7 +103,6 @@ export function buildStatusTimeline(
       durationHours: hoursBetween(enteredAt, exitedAt),
     });
   }
-
 
   const last = timeline[timeline.length - 1];
 
@@ -103,6 +115,7 @@ export function buildStatusTimeline(
     last.exitedAt = endTime;
     last.durationHours = hoursBetween(last.enteredAt, endTime);
   }
+
   return timeline;
 }
 

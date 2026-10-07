@@ -41,10 +41,9 @@ function buildSummary(
   ];
 
   const totalAnomalies =
-    contextSwitching.filter((c) => c.isAnomaly).length +
-    handoffBreakdowns.filter((h) => h.isAnomaly).length +
-    hiddenWaiting.filter((w) => w.isAnomaly).length +
-    riskScores.filter((r) => r.isWaitingTimeAnomaly).length;
+  contextSwitching.filter((c) => c.isAnomaly).length +
+  handoffBreakdowns.filter((h) => h.isAnomaly).length +
+  hiddenWaiting.filter((w) => w.isAnomaly).length;
 
   const avgPenalty =
     severities.length === 0

@@ -25,6 +25,15 @@ export async function requireUser(req: Request, res: Response, next: NextFunctio
       return next();
     }
 
+    // The legacy X-User-Id header trusts the caller's claimed identity with no
+    // credential, so it is a development convenience only and is refused in
+    // production unless explicitly re-enabled.
+    const legacyAllowed =
+      process.env.NODE_ENV !== "production" || process.env.ALLOW_LEGACY_USER_ID_HEADER === "true";
+    if (!legacyAllowed) {
+      throw new AppError("Authentication required: provide a Bearer token", 401);
+    }
+
     const userId = req.header("X-User-Id");
     if (!userId) {
       throw new AppError("Missing Authorization bearer token or X-User-Id header", 401);
